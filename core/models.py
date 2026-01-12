@@ -12,7 +12,7 @@ class User(AbstractUser):
 class Base_Event(models.Model):
     # local_uuid: Vital para que el móvil cree eventos sin internet y no choquen con la PC
     local_uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False) 
-    # Denominación y lugar permitirán el "autocompletado" en el front buscando valores existentes
+    # Denominación y lugar permitirán el "autocompletado" buscando valores existentes
     denomination = models.CharField(max_length=100) 
     date = models.DateField()
     sex = models.CharField(max_length=1, choices=[('M', 'Masculino'), ('F', 'Femenino')])
@@ -35,12 +35,11 @@ class Mix_Game_Place(Mix_Game):
     class Meta:
         abstract = True 
 
-# --- Estructura de Atletas y Equipos (El Historial) ---
+# --- Estructura de Atletas y Equipos (Historial y Roster) ---
 
 class Athlete(models.Model):
     """
     NÚCLEO DEL HISTORIAL: Aquí se guardan los datos fijos del deportista.
-    Permite búsquedas por nombre y es la base para el 'Diagrama de Araña'.
     """
     full_name = models.CharField(max_length=100, unique=True)
     sex = models.CharField(max_length=1, choices=[('M', 'Masculino'), ('F', 'Femenino')])
@@ -50,9 +49,8 @@ class Athlete(models.Model):
 
 class Player(models.Model):
     """
-    EL ROL: El Atleta jugando un partido específico con un número y posición.
+    EL ROL: El Atleta jugando con un número y posición específica.
     """
-    # El Player apunta al Atleta para mantener la conexión con su historial global
     athlete = models.ForeignKey(Athlete, on_delete=models.CASCADE, related_name='roles', null=True)
     number = models.IntegerField(default=1)
     position = models.CharField(max_length=50) 
@@ -62,13 +60,12 @@ class Player(models.Model):
         return f"{self.athlete.full_name} (#{self.number})"
 
 class Team(models.Model):
-    """
-    EQUIPOS: Permite buscar estadísticas grupales.
-    """
-    name = models.CharField(max_length=100, unique=True)
-    # player1 y player2 vinculados a sus roles de Player
-    player1 = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='team_p1', null=True)
-    player2 = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='team_p2', null=True)
+    name = models.CharField(max_length=100, default='')
+    
+    # CAMBIO IMPORTANTE: ManyToManyField
+    # Permite registrar 2 jugadores (Competencia) o N jugadores (Entrenamiento).
+    # Esto soluciona la rotación de jugadores en el entrenamiento.
+    players = models.ManyToManyField(Player, related_name='teams')
 
     def __str__(self):
         return self.name
@@ -83,24 +80,21 @@ class Set(models.Model):
     set_winner = models.CharField(blank=True, null=True, max_length=100)
 
 class Game_Info(models.Model):
-    """
-    CONTROL DE ESTADOS: Permite diferenciar entre 'Visualizar Resultados' 
-    (finalizado) y 'Cargar Partido' (en curso).
-    """
+    # Estados para diferenciar 'Cargar Partido' vs 'Visualizar Resultados'
     STATUS_CHOICES = [
         ('IN_PROGRESS', 'En Curso / Parcial'),
         ('COMPLETED', 'Finalizado / Oficial'),
     ]
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='IN_PROGRESS')
-    
+
     team_1 = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='game_team_1')
     team_2 = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='game_team_2')
     
-    # Datos finales para el informe de 'Visualizar Resultados'
+    # Datos finales
     final_score_t1 = models.IntegerField(default=0)
     final_score_t2 = models.IntegerField(default=0)
     total_duration = models.DurationField(null=True, blank=True)
-
+    
     # Relación con los sets
     set_1 = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='game_set_1', null=True)
     set_2 = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='game_set_2', null=True)
@@ -108,8 +102,10 @@ class Game_Info(models.Model):
 
 class Play(models.Model):
     """
-    ESTADÍSTICA PURA: Cada acción alimenta el historial del ATLETA.
+    Esta tabla unifica la captura de Móvil y PC.
+    El móvil enviará solo lo básico. La PC enviará los campos null=True.
     """
+    # ACCIONES (Las 6 básicas + Error No Forzado del Guion)
     ACTION_CHOICES = [
         ('SER', 'Servicio'), ('REC', 'Recepción'), ('ACO', 'Acomodada'),
         ('ATA', 'Ataque'), ('BLO', 'Bloqueo'), ('DEF', 'Defensa'),
@@ -117,7 +113,7 @@ class Play(models.Model):
     ]
     action_type = models.CharField(max_length=3, choices=ACTION_CHOICES)
 
-    # SUB-ACCIONES (Solo PC)
+    # SUB-ACCIONES (Solo PC - Se quedan en blanco si vienen del móvil)
     SUB_ACTION_CHOICES = [
         ('BAJ', 'Por abajo'), ('FLO', 'Flotado'), ('SAL', 'Salto fuerte'), ('SAF', 'Salto flotado'), 
         ('2MA', 'Dos manos abajo'), ('PPM', 'Pirámide/Puño'), 
@@ -129,17 +125,23 @@ class Play(models.Model):
     ]
     sub_action = models.CharField(max_length=3, choices=SUB_ACTION_CHOICES, null=True, blank=True)
 
-    # EVALUACIÓN (0 a 4): Base para el diagrama de araña
-    evaluation = models.IntegerField(default=0)
+    # NUEVA EVALUACIÓN (0 a 4)
+    evaluation = models.IntegerField(default=0, help_text="0=Negativo, 4=Positivo. Escala 0-4")
 
-    # VINCULACIÓN: La jugada pertenece a un Atleta (historial) y a un partido (contexto)
+    # VINCULACIÓN:
+    # Vinculamos directo al Atleta para mantener estadísticas aunque se cambie de equipo o rol
     athlete = models.ForeignKey(Athlete, on_delete=models.CASCADE, related_name='performances', null=True)
-    game_info = models.ForeignKey(Game_Info, on_delete=models.CASCADE, related_name='plays', null=True)
-    set_period = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='plays')
+    # Vinculamos al Team para saber a qué bando pertenecía el punto en ese momento
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='team_plays', null=True)
     
-    timestamp = models.CharField(max_length=10) # Formato MM:SS para el cronómetro
+    set_period = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='plays')
+    timestamp = models.CharField(max_length=10, help_text="Formato MM:SS") 
+
+    # ZONAS (Solo PC)
     origin_zone = models.CharField(max_length=10, null=True, blank=True)
     target_zone = models.CharField(max_length=10, null=True, blank=True)
+
+    # VIENTO (Mencionado en el Guion como factor externo)
     wind = models.CharField(max_length=1, choices=[('F', 'A favor'), ('C', 'En contra')], null=True, blank=True)
 
 # --- Clases Hijas: Los 4 Tipos de Eventos Reales ---
