@@ -1,39 +1,28 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 import uuid
+from datetime import timedelta
 
 # 1. USUARIO (Acceso multiplataforma: Móvil/PC)
 class User(AbstractUser):
     ROLE_CHOICES = (('admin', 'Administrador'), ('coach', 'Entrenador'))
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='coach')
 
-# --- Clases padre (Abstractas) para organizar los eventos ---
+# --- NUEVO: Opciones fijas para Mesociclos y Microciclos (Sin redundancia) ---
+MESO_CHOICES = [
+    ('ENT', 'Entrante'), ('BAS', 'Básico'), ('BDE', 'Básico desarrollador'),
+    ('BES', 'Básico estabilizador'), ('PRE_CON', 'Preparatorio de control'),
+    ('PRE_COM', 'Precompetitivo'), ('COM', 'Competitivo'),
+    ('RES_MAN', 'De restablecimiento mantenedor'),
+    ('PRE_RES', 'Preparatorio de restablecimiento'),
+    ('PRE_MAN', 'Preparatorio de mantenimiento'),
+]
 
-class Base_Event(models.Model):
-    # local_uuid: Vital para que el móvil cree eventos sin internet y no choquen con la PC
-    local_uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False) 
-    # Denominación y lugar permitirán el "autocompletado" buscando valores existentes
-    denomination = models.CharField(max_length=100) 
-    date = models.DateField()
-    sex = models.CharField(max_length=1, choices=[('M', 'Masculino'), ('F', 'Femenino')])
-    category = models.CharField(max_length=50)
-
-    class Meta:
-        abstract = True
-
-class Mix_Game(Base_Event):
-    micro_denomination = models.CharField(max_length=150, default='')
-    week_day = models.CharField(max_length=10, default='Lunes') 
-    micro_number = models.IntegerField(default=0)
-
-    class Meta:
-        abstract = True 
-
-class Mix_Game_Place(Mix_Game):
-    place = models.CharField(max_length=100)
-
-    class Meta:
-        abstract = True 
+MICRO_CHOICES = [
+    ('ORD', 'Ordinario'), ('CHO', 'De choque intensivo'),
+    ('APR', 'De aproximación'), ('COM', 'Competitivo'),
+    ('REC', 'De recuperación o restablecimiento'),
+]
 
 # --- Estructura de Atletas y Equipos (Historial y Roster) ---
 
@@ -74,6 +63,7 @@ class Team(models.Model):
 
 class Set(models.Model):
     set_number = models.IntegerField(default=1) # 1, 2 o 3
+    # NUEVO: Tiempo del cronómetro por set
     time_set = models.DurationField(blank=True, null=True)
     score_a = models.IntegerField(default=0)
     score_b = models.IntegerField(default=0)
@@ -87,18 +77,33 @@ class Game_Info(models.Model):
     ]
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='IN_PROGRESS')
 
-    team_1 = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='game_team_1')
-    team_2 = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='game_team_2')
+    # NUEVO: Nombres neutrales para equipos (Equipo A vs Equipo B)
+    team_a = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='game_team_a', verbose_name="Equipo A")
+    team_b = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='game_team_b', verbose_name="Equipo B")
     
-    # Datos finales
-    final_score_t1 = models.IntegerField(default=0)
-    final_score_t2 = models.IntegerField(default=0)
+    # Datos finales y cronómetro total
+    final_score_a = models.IntegerField(default=0)
+    final_score_b = models.IntegerField(default=0)
     total_duration = models.DurationField(null=True, blank=True)
     
     # Relación con los sets
     set_1 = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='game_set_1', null=True)
     set_2 = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='game_set_2', null=True)
     set_3 = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='game_set_3', null=True, blank=True)
+
+    def get_total_played_time(self):
+        """Suma el tiempo efectivo de los sets jugados"""
+        total = timedelta()
+        if self.set_1 and self.set_1.time_set:
+            total += self.set_1.time_set
+        if self.set_2 and self.set_2.time_set:
+            total += self.set_2.time_set
+        if self.set_3 and self.set_3.time_set:
+            total += self.set_3.time_set
+        return total
+
+    def __str__(self):
+        return f"{self.team_a} vs {self.team_b} ({self.status})"
 
 class Play(models.Model):
     """
@@ -135,6 +140,7 @@ class Play(models.Model):
     team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='team_plays', null=True)
     
     set_period = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='plays')
+    # NUEVO: Registro del tiempo exacto del cronómetro (MM:SS)
     timestamp = models.CharField(max_length=10, help_text="Formato MM:SS") 
 
     # ZONAS (Solo PC)
@@ -144,20 +150,54 @@ class Play(models.Model):
     # VIENTO (Mencionado en el Guion como factor externo)
     wind = models.CharField(max_length=1, choices=[('F', 'A favor'), ('C', 'En contra')], null=True, blank=True)
 
+# --- Clases padre (Abstractas) para organizar los eventos ---
+
+class Base_Event(models.Model):
+    # local_uuid: Vital para que el móvil cree eventos sin internet y no choquen con la PC
+    local_uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False) 
+    date = models.DateField()
+    sex = models.CharField(max_length=1, choices=[('M', 'Masculino'), ('F', 'Femenino')])
+    category = models.CharField(max_length=50)
+
+    # NUEVO: Movido a la base para que todos hereden el contenedor de estadísticas
+    game_data = models.OneToOneField('Game_Info', on_delete=models.CASCADE, null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+class Mix_Game(Base_Event):
+    # NUEVO: Uso de Choices para denominaciones
+    meso_denomination = models.CharField(max_length=10, choices=MESO_CHOICES)
+    micro_denomination = models.CharField(max_length=10, choices=MICRO_CHOICES)
+    week_day = models.CharField(max_length=10, default='Lunes') 
+    micro_number = models.IntegerField(default=0)
+
+    class Meta:
+        abstract = True 
+
+class Mix_Game_Place(Mix_Game):
+    place = models.CharField(max_length=100)
+
+    class Meta:
+        abstract = True 
+
 # --- Clases Hijas: Los 4 Tipos de Eventos Reales ---
 
 class Competition(Base_Event):
+    # Denominación y lugar permitirán el "autocompletado" buscando valores existentes
+    denomination = models.CharField(max_length=100) 
     place = models.CharField(max_length=100) 
     start_time = models.TimeField()
-    game_data = models.OneToOneField(Game_Info, on_delete=models.CASCADE, null=True)
+    team_a = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='competition_team_a', null=True, verbose_name="Equipo A")
+    team_b = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='competition_team_b', null=True, verbose_name="Equipo B")
+
 
 class Intern_Control_Game(Mix_Game_Place):
-    game_data = models.OneToOneField(Game_Info, on_delete=models.CASCADE, null=True)
+    pass
 
-class Training(Base_Event):
+class Training(Mix_Game):
     objective = models.CharField(max_length=200)
-    game_data = models.OneToOneField(Game_Info, on_delete=models.CASCADE, null=True)
 
 class Extern_Control_Game(Mix_Game_Place):
-    rival_team_name = models.CharField(max_length=150)
-    game_data = models.OneToOneField(Game_Info, on_delete=models.CASCADE, null=True)
+    team_a = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='extern_team_a', null=True, verbose_name="Equipo A")
+    team_b = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='extern_team_b', null=True, verbose_name="Equipo B")
