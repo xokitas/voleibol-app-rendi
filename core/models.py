@@ -8,42 +8,48 @@ class User(AbstractUser):
     ROLE_CHOICES = (('admin', 'Administrador'), ('coach', 'Entrenador'))
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='coach')
 
-# --- NUEVO: Opciones fijas para Mesociclos y Microciclos (Sin redundancia) ---
-MESO_CHOICES = [
-    ('ENT', 'Entrante'), ('BAS', 'Básico'), ('BDE', 'Básico desarrollador'),
-    ('BES', 'Básico estabilizador'), ('PRE_CON', 'Preparatorio de control'),
-    ('PRE_COM', 'Precompetitivo'), ('COM', 'Competitivo'),
-    ('RES_MAN', 'De restablecimiento mantenedor'),
-    ('PRE_RES', 'Preparatorio de restablecimiento'),
-    ('PRE_MAN', 'Preparatorio de mantenimiento'),
-]
-
-MICRO_CHOICES = [
-    ('ORD', 'Ordinario'), ('CHO', 'De choque intensivo'),
-    ('APR', 'De aproximación'), ('COM', 'Competitivo'),
-    ('REC', 'De recuperación o restablecimiento'),
-]
-
 # --- Estructura de Atletas y Equipos (Historial y Roster) ---
 
 class Athlete(models.Model):
-    """
-    NÚCLEO DEL HISTORIAL: Aquí se guardan los datos fijos del deportista.
-    """
-    full_name = models.CharField(max_length=100, unique=True)
-    sex = models.CharField(max_length=1, choices=[('M', 'Masculino'), ('F', 'Femenino')])
     
+    SEX_CHOICES = [
+        ('M', 'Masculino'),
+        ('F', 'Femenino'),
+    ]
+
+    full_name = models.CharField(max_length=100)
+    sex = models.CharField(
+        max_length=1, 
+        choices=SEX_CHOICES, 
+        default='M'
+    )
     def __str__(self):
         return self.full_name
 
 class Player(models.Model):
-    """
-    EL ROL: El Atleta jugando con un número y posición específica.
-    """
+    POSITION_CHOICES = [
+        ('B', 'Bloqueador'),
+        ('D', 'Defensor'),
+    ]
+    
+    ZONE_CHOICES = [
+        ('IZQ', 'Izquierda'),
+        ('CEN', 'Centro'),
+        ('DER', 'Derecha'),
+    ]
+
     athlete = models.ForeignKey(Athlete, on_delete=models.CASCADE, related_name='roles', null=True)
     number = models.IntegerField(default=1)
-    position = models.CharField(max_length=50) 
-    zone = models.CharField(max_length=20)
+    position = models.CharField(
+        max_length=1, 
+        choices=POSITION_CHOICES, 
+        default='B'
+    )
+    zone = models.CharField(
+        max_length=3, 
+        choices=ZONE_CHOICES, 
+        default='CEN'
+    )
 
     def __str__(self):
         return f"{self.athlete.full_name} (#{self.number})"
@@ -120,18 +126,36 @@ class Play(models.Model):
 
     # SUB-ACCIONES (Solo PC - Se quedan en blanco si vienen del móvil)
     SUB_ACTION_CHOICES = [
+        # SERVICIO
         ('BAJ', 'Por abajo'), ('FLO', 'Flotado'), ('SAL', 'Salto fuerte'), ('SAF', 'Salto flotado'), 
+        # RECEPCION
         ('2MA', 'Dos manos abajo'), ('PPM', 'Pirámide/Puño'), 
+        # ACOMODADA
         ('P2A', 'Dos manos arriba'), ('P2B', 'Dos manos abajo'), 
+        # ATAQUE
         ('RM', 'Remate fuerte'), ('RCA', 'Remate colocado'), ('UB', 'Usa Bloqueo'), 
-        ('TR', 'Tiro de nudillo'), ('ADC', 'Acomodada directa'), ('RD', 'Recibo directo'),
+        # TO-do FALTAN DOS ACCIONES DE ATAQUE
+        ('TR', 'Tiro de nudillo'), ('ACD', 'Acomodada directa'),('RDJ', 'RDJN'), ('RDP', 'RDPMP'),('RD', 'Recibo directo'),
+        # BLOQUEO
         ('BL', 'Línea'), ('BD', 'Diagonal'), ('BN', 'No bloquea/Cubre'), 
-        ('DD', 'Diagonal desafiando'), ('DLT', 'Hacia la línea'), ('LD', 'Línea a diagonal'), ('CC', 'Centro')
+        # DEFENSA
+        ('DD', 'Diagonal desafiando'), ('DLT', 'Hacia la línea'), ('LD', 'Línea a diagonal'), ('CC', 'Centro'),
+        # TO-do ERROR NO FORZADO FALTAN LOS NOMBRES DE LAS SUBACCIONES 
+        ('ENS', 'S'), ('ENR', 'R'), ('ENP', 'P'), ('ENM','M')
     ]
     sub_action = models.CharField(max_length=3, choices=SUB_ACTION_CHOICES, null=True, blank=True)
 
     # NUEVA EVALUACIÓN (0 a 4)
     evaluation = models.IntegerField(default=0, help_text="0=Negativo, 4=Positivo. Escala 0-4")
+
+    # ZONAS (Nuevos CHOICES aplicados)
+    ZONE_CHOICES = [
+        ('IZQ', 'Izquierda'),
+        ('CEN', 'Centro'),
+        ('DER', 'Derecha'),
+    ]
+    origin_zone = models.CharField(max_length=3, choices=ZONE_CHOICES, null=True, blank=True)
+    target_zone = models.CharField(max_length=3, choices=ZONE_CHOICES, null=True, blank=True)
 
     # VINCULACIÓN:
     # Vinculamos directo al Atleta para mantener estadísticas aunque se cambie de equipo o rol
@@ -142,10 +166,6 @@ class Play(models.Model):
     set_period = models.ForeignKey(Set, on_delete=models.CASCADE, related_name='plays')
     # NUEVO: Registro del tiempo exacto del cronómetro (MM:SS)
     timestamp = models.CharField(max_length=10, help_text="Formato MM:SS") 
-
-    # ZONAS (Solo PC)
-    origin_zone = models.CharField(max_length=10, null=True, blank=True)
-    target_zone = models.CharField(max_length=10, null=True, blank=True)
 
     # VIENTO (Mencionado en el Guion como factor externo)
     wind = models.CharField(max_length=1, choices=[('F', 'A favor'), ('C', 'En contra')], null=True, blank=True)
@@ -166,10 +186,31 @@ class Base_Event(models.Model):
         abstract = True
 
 class Mix_Game(Base_Event):
+
+    # --- NUEVO: Opciones fijas para Mesociclos y Microciclos (Sin redundancia) ---
+    MESO_CHOICES = [
+        ('ENT', 'Entrante'), ('BAS', 'Básico'), ('BDE', 'Básico desarrollador'),
+        ('BES', 'Básico estabilizador'), ('PRE_CON', 'Preparatorio de control'),
+        ('PRE_COM', 'Precompetitivo'), ('COM', 'Competitivo'),
+        ('RES_MAN', 'De restablecimiento mantenedor'),
+        ('PRE_RES', 'Preparatorio de restablecimiento'),
+        ('PRE_MAN', 'Preparatorio de mantenimiento'),
+    ]
+
+    MICRO_CHOICES = [
+        ('ORD', 'Ordinario'), ('CHO', 'De choque intensivo'),
+        ('APR', 'De aproximación'), ('COM', 'Competitivo'),
+        ('REC', 'De recuperación o restablecimiento'),
+    ]
+    
+    WEEK_CHOICES = [
+        ('LUN','Lunes'), ('MAR','Martes'),('MIE','Miércoles'), ('JUE','Jueves'),('VIE','Viernes'), ('SAB','Sábado'), ('DOM','Domingo')
+    ]
+
     # NUEVO: Uso de Choices para denominaciones
     meso_denomination = models.CharField(max_length=10, choices=MESO_CHOICES)
     micro_denomination = models.CharField(max_length=10, choices=MICRO_CHOICES)
-    week_day = models.CharField(max_length=10, default='Lunes') 
+    week_day = models.CharField(max_length=10, default='Lunes', choices=WEEK_CHOICES) 
     micro_number = models.IntegerField(default=0)
 
     class Meta:
