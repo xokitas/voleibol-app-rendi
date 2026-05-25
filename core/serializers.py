@@ -39,17 +39,13 @@ class MatchConfigSerializer(serializers.Serializer):
 class RallyActionSerializer(serializers.Serializer):
     # Ahora validamos contra las opciones del modelo
     category = serializers.ChoiceField(choices=PlayModel.ACTION_CHOICES)
-    subAction = serializers.ChoiceField(choices=PlayModel.SUB_ACTION_CHOICES)
+    subAction = serializers.ChoiceField(choices=PlayModel.SUB_ACTION_CHOICES, required=False, allow_blank=True, allow_null=True)
     playerId = serializers.CharField()
     value = serializers.IntegerField(required=False, allow_null=True)
-    origin = serializers.CharField(required=False, allow_blank=True)
-    destination = serializers.CharField(required=False, allow_blank=True)
-    wind = serializers.ChoiceField(
-        choices=PlayModel.WIND_CHOICES,
-        required=False,
-        allow_blank=True
-    )
-    timestamp = serializers.CharField(required=False, allow_blank=True)
+    origin = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    destination = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    wind = serializers.ChoiceField(choices=PlayModel.WIND_CHOICES, required=False, allow_blank=True, allow_null=True)
+    timestamp = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 class RallySerializer(serializers.Serializer):
     winner = serializers.CharField(required=False, allow_blank=True)
