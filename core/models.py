@@ -5,8 +5,12 @@ from datetime import timedelta
 
 # 1. USUARIO (Acceso multiplataforma: Móvil/PC)
 class User(AbstractUser):
+    email = models.EmailField(unique=True)
     ROLE_CHOICES = (('admin', 'Administrador'), ('coach', 'Entrenador'))
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='coach')
+
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ['username']
 
 # --- Estructura de Atletas y Equipos (Historial y Roster) ---
 
