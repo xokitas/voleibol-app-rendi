@@ -1,9 +1,9 @@
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from core.views import AthleteViewSet, PlayViewSet, TeamViewSet, SetViewSet, GameInfoViewSet
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from core.views import AthleteViewSet, PlayViewSet, TeamViewSet, SetViewSet, GameInfoViewSet, MatchCreateView
 
-# El Router crea las URLs automáticamente (ej: /api/athletes/)
 router = DefaultRouter()
 router.register(r'athletes', AthleteViewSet)
 router.register(r'plays', PlayViewSet)
@@ -13,5 +13,9 @@ router.register(r'games', GameInfoViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include(router.urls)), # Todas las rutas de la API bajo /api/
+    path('api/', include(router.urls)),
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/matches/', MatchCreateView.as_view(), name='match-create'),
+
 ]
