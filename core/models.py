@@ -54,6 +54,10 @@ class Player(models.Model):
         choices=ZONE_CHOICES, 
         default='CEN'
     )
+    fullName = models.CharField(
+        max_length=100, default=''
+    )
+
 
     def __str__(self):
         return f"{self.athlete.full_name} (#{self.number})"
