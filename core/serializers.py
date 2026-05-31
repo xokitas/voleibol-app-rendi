@@ -1,48 +1,12 @@
 from rest_framework import serializers
-from .models import Play, Athlete, Team, Set, Game_Info
+from .models import (
+    Game_Info, Set, Rally, Play, Player, Team, Athlete
+)
 
-class PlaySerializer(serializers.ModelSerializer):
-    # Mostramos el nombre del atleta y el equipo en lugar de solo el ID
-    athlete_name = serializers.ReadOnlyField(source='athlete.full_name')
-    team_name = serializers.ReadOnlyField(source='team.name')
+# Importamos los choices del modelo Play para validación exacta
+from .models import Play as PlayModel  # alias para no confundir
 
-    class Meta:
-        model = Play
-        fields = [
-            'id', 'action_type', 'sub_action', 'evaluation', 
-            'athlete', 'athlete_name', 'team', 'team_name', 
-            'set_period', 'timestamp', 'origin_zone', 
-            'target_zone', 'wind'
-        ]
-
-    def validate_evaluation(self, value):
-        """Validación personalizada: La escala debe ser 0-4"""
-        if value < 0 or value > 4:
-            raise serializers.ValidationError("La evaluación debe estar entre 0 y 4.")
-        return value
-    
-class AthleteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Athlete
-        fields = ['id', 'full_name', 'sex']
-
-class TeamSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Team
-        fields = '__all__'
-
-class SetSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Set
-        fields = '__all__'
-
-class GameInfoSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Game_Info
-        fields = '__all__'
-
-from .models import Player
-
+# ==================== ENTRADA (validación del JSON) ====================
 class MatchPlayerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Player
@@ -73,14 +37,15 @@ class MatchConfigSerializer(serializers.Serializer):
     createdBy = serializers.CharField(required=False, allow_blank=True)
 
 class RallyActionSerializer(serializers.Serializer):
-    category = serializers.CharField()
-    subAction = serializers.CharField()
+    # Ahora validamos contra las opciones del modelo
+    category = serializers.ChoiceField(choices=PlayModel.ACTION_CHOICES)
+    subAction = serializers.ChoiceField(choices=PlayModel.SUB_ACTION_CHOICES, required=False, allow_blank=True, allow_null=True)
     playerId = serializers.CharField()
     value = serializers.IntegerField(required=False, allow_null=True)
-    origin = serializers.CharField(required=False, allow_blank=True)
-    destination = serializers.CharField(required=False, allow_blank=True)
-    wind = serializers.CharField(required=False, allow_blank=True)
-    timestamp = serializers.CharField(required=False, allow_blank=True)
+    origin = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    destination = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    wind = serializers.ChoiceField(choices=PlayModel.WIND_CHOICES, required=False, allow_blank=True, allow_null=True)
+    timestamp = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 class RallySerializer(serializers.Serializer):
     winner = serializers.CharField(required=False, allow_blank=True)
@@ -105,3 +70,128 @@ class MatchSerializer(serializers.Serializer):
     history = SetHistorySerializer(many=True)
     totalTimeSeconds = serializers.IntegerField(required=False, allow_null=True)
     realTimeSeconds = serializers.IntegerField(required=False, allow_null=True)
+
+
+# ==================== SALIDA (reconstrucción del JSON) ====================
+# Los serializadores de salida ya mapean correctamente los campos de la BD,
+# así que no necesitan cambios.
+
+class PlayOutputSerializer(serializers.ModelSerializer):
+    playerId = serializers.SerializerMethodField()
+    category = serializers.CharField(source='action_type')
+    subAction = serializers.CharField(source='sub_action')
+    value = serializers.IntegerField(source='evaluation')
+    origin = serializers.CharField(source='origin_zone')
+    destination = serializers.CharField(source='target_zone')
+
+    class Meta:
+        model = Play
+        fields = ['playerId', 'category', 'subAction', 'value', 'origin', 'destination', 'wind', 'timestamp']
+
+    def get_playerId(self, obj):
+        game = obj.rally.set.game
+        prefix = 'A' if obj.team == game.team_a else 'B'
+        return f"{prefix}-{obj.player.number}"
+
+
+class RallyOutputSerializer(serializers.ModelSerializer):
+    scoreAtTheTime = serializers.SerializerMethodField()
+    actions = PlayOutputSerializer(many=True, source='plays')
+
+    class Meta:
+        model = Rally
+        fields = ['winner', 'scoreAtTheTime', 'actions']
+
+    def get_scoreAtTheTime(self, obj):
+        return {'A': obj.score_a, 'B': obj.score_b}
+
+
+class SetOutputSerializer(serializers.ModelSerializer):
+    set = serializers.IntegerField(source='set_number')
+    rallies = RallyOutputSerializer(many=True)
+
+    class Meta:
+        model = Set
+        fields = ['set', 'rallies']
+
+
+class GameOutputSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source='pk')
+    config = serializers.SerializerMethodField()
+    score = serializers.SerializerMethodField()
+    history = serializers.SerializerMethodField()
+    status = serializers.CharField()
+
+
+    class Meta:
+        model = Game_Info
+        fields = ['id', 'config', 'score', 'history', 'totalTimeSeconds', 'realTimeSeconds', 'status']
+
+    def get_config(self, obj):
+        return {
+            'tournament': obj.tournament,
+            'category': obj.category,
+            'date': obj.date,
+            'matchNumber': obj.matchNumber,
+            'gender': obj.gender,
+            'eventType': obj.eventType,
+            'startTime': obj.startTime,
+            'place': obj.place,
+            'denomination': obj.denomination,
+            'meso': obj.meso,
+            'micro': obj.micro,
+            'weekDay': obj.weekDay,
+            'microNumber': obj.microNumber,
+            'objective': obj.objective,
+            'teamA': {
+                'name': obj.team_a.name,
+                'players': list(obj.team_a.players.values('number', 'fullName', 'position', 'zone'))
+            },
+            'teamB': {
+                'name': obj.team_b.name,
+                'players': list(obj.team_b.players.values('number', 'fullName', 'position', 'zone'))
+            },
+            'platform': obj.platform,
+            'createdBy': obj.createdBy,
+        }
+
+    def get_score(self, obj):
+        return {
+            'setsA': obj.setsA,
+            'setsB': obj.setsB,
+            'pointsA': obj.pointsA,
+            'pointsB': obj.pointsB,
+            'currentSet': obj.currentSet,
+        }
+
+    def get_history(self, obj):
+        sets = obj.sets.all().order_by('set_number')
+        return SetOutputSerializer(sets, many=True).data
+
+
+# Serializadores para los ViewSets existentes (sin cambios)
+class PlaySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Play
+        fields = '__all__'
+
+class AthleteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Athlete
+        fields = '__all__'
+
+class TeamSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Team
+        fields = '__all__'
+
+class SetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Set
+        fields = '__all__'
+
+class GameInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Game_Info
+        fields = '__all__'
+
