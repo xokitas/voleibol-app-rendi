@@ -23,7 +23,7 @@ class Athlete(models.Model):
 
 
 class Player(models.Model):
-    POSITION_CHOICES = [('B', 'Bloqueador'), ('D', 'Defensor')]
+    POSITION_CHOICES = [('B', 'Bloqueador'), ('D', 'Defensor'), ('U', 'Universal')]
     ZONE_CHOICES = [('IZQ', 'Izquierda'), ('CEN', 'Centro'), ('DER', 'Derecha')]
 
     athlete = models.ForeignKey(Athlete, on_delete=models.CASCADE, related_name='roles', null=True)
@@ -59,7 +59,7 @@ class Game_Info(models.Model):
 
     # Metadatos del partido (MatchConfig)
     tournament = models.CharField(max_length=200, default='')
-    category = models.CharField(max_length=50, default='')
+    category = models.CharField(max_length=100, default='')
     date = models.CharField(max_length=30, default='')
     matchNumber = models.IntegerField(default=0)
     gender = models.CharField(max_length=1, default='M')
